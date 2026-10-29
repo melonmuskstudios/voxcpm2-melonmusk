@@ -1,0 +1,9 @@
+{
+  "id": "voxcpm2",
+  "name": "VoxCPM2",
+  "weights": "openbmb/VoxCPM2 (Hugging Face)",
+  "code": "https://github.com/OpenBMB/VoxCPM",
+  "gpu_memory_gb_per_gpu": 8,
+  "download_gb": 5,
+  "install": "pip install -e <VoxCPM clone> fastapi uvicorn python-multipart psutil soundfile"
+}
