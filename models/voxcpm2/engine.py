@@ -39,7 +39,7 @@ class _Worker:
         import torch
         self.torch = torch
         from voxcpm import VoxCPM
-        kw = dict(load_denoiser=bool(self.cfg["denoiser"]), device="cuda:0")
+        kw = dict(load_denoiser=bool(self.cfg["denoiser"]), device="cuda")
         try:
             self.model = VoxCPM.from_pretrained(self.cfg["model"], optimize=bool(self.cfg["optimize"]), **kw)
         except Exception as e:  # noqa: BLE001 - torch.compile problems must not leave the GPU unused
@@ -61,7 +61,7 @@ class _Worker:
             import torch
             from transformers import pipeline
             self.asr = pipeline("automatic-speech-recognition", model=self.cfg["asr_model"],
-                                torch_dtype=torch.float16, device="cuda:0")
+                                torch_dtype=torch.float16, device="cuda")
         return self.asr
 
     def transcribe(self, path, lang):

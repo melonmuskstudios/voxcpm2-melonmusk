@@ -9,6 +9,7 @@ from pathlib import Path
 
 from common.audico_server import Adapter
 from .engine import Pool
+from .textprep import split_script
 
 LANGS = ["Arabic", "Burmese", "Chinese", "Danish", "Dutch", "English", "Finnish", "French", "German", "Greek", "Hebrew", "Hindi", "Indonesian",
          "Italian", "Japanese", "Khmer", "Korean", "Lao", "Malay", "Norwegian", "Polish", "Portuguese", "Russian", "Spanish", "Swahili",
@@ -49,6 +50,8 @@ class VoxCPM2(Adapter):
             {"key": "steps", "label": "Inference steps", "type": "slider", "min": 4, "max": 30, "step": 1, "default": 10,
              "help": "More steps = better quality, slower."},
         ]
+        settings.append({"key": "split", "label": "Use every GPU for one part", "type": "toggle", "default": True,
+                         "help": "Cuts a long part at sentence ends and makes the pieces on all GPUs at the same time, then joins them. Faster on 2 GPUs."})
         if i.get("denoiser"):
             settings.append({"key": "denoise", "label": "Denoise the sample", "type": "toggle", "default": False,
                              "help": "Cleans noise from the voice sample first."})
@@ -83,9 +86,31 @@ class VoxCPM2(Adapter):
         task = dict(kind="tts", text=text, ref=ref_path, prompt_text=ref_text if (use_text and ref_path) else None, style=style,
                     cfg=num("cfg", 0.0, 6.0, 2.0), steps=int(num("steps", 2, 40, 10)), seed=seed,
                     denoise=bool(settings.get("denoise", False)), out=str(out), check=False)
+        pieces = [text]
+        n = self.pool.usable
+        if bool(settings.get("split", True)) and n > 1 and len(text) > 160:
+            want = max(n, -(-len(text) // 200))                  # about 200 characters a piece, at least one per GPU
+            limit = -(-len(text) // want) + 60
+            pieces = [c["text"] for c in split_script(text, max_chars=limit)] or [text]
         with self._sem:
-            r = self.pool.submit(task).result(timeout=900)
-        return r["path"], float(r["seconds"])
+            futs = [self.pool.submit(dict(task, text=t, out=f"{out}_p{k}")) for k, t in enumerate(pieces)]
+            results = [f.result(timeout=900) for f in futs]
+        if len(results) == 1:
+            return results[0]["path"], float(results[0]["seconds"])
+        import numpy as np
+        import soundfile as sf
+        audio, sr = [], None
+        for k, r in enumerate(results):
+            a, sr = sf.read(r["path"], dtype="float32")
+            if a.ndim > 1:
+                a = a.mean(axis=1)
+            audio.append(a)
+            if k < len(results) - 1:
+                audio.append(np.zeros(int(0.12 * sr), dtype="float32"))
+        y = np.concatenate(audio)
+        joined = f"{out}_joined.wav"
+        sf.write(joined, y, sr, subtype="PCM_16")
+        return joined, len(y) / float(sr)
 
 
 def load(work: Path):
